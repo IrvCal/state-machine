@@ -5,7 +5,6 @@ import com.irv.statemachine.domain.PaymentEvent;
 import com.irv.statemachine.domain.PaymentState;
 import com.irv.statemachine.repository.PaymentRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.statemachine.StateMachine;
@@ -17,10 +16,11 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class PaymentServiceImpl implements PaymentService{
 
-    private static final String PAYMENT_ID_HEADER = "payment_id";
-    @Autowired
-    private PaymentRepository repository;
+    public static final String PAYMENT_ID_HEADER = "payment_id";
+
     private final StateMachineFactory<PaymentState,PaymentEvent> factory;
+    private PaymentRepository repository;
+    private final PaymentStateChangeInterceptor interceptor;
 
     @Override
     public Payment newPayment(Payment payment) {
@@ -30,7 +30,7 @@ public class PaymentServiceImpl implements PaymentService{
 
     @Override
     public StateMachine<PaymentState, PaymentEvent> preAuth(Long paymentId) {
-        StateMachine<PaymentState,PaymentEvent> sm = buid(paymentId);
+        StateMachine<PaymentState,PaymentEvent> sm = build(paymentId);
 
         sendEvent(paymentId,sm,PaymentEvent.PRE_AUTHORIZE);
 
@@ -39,7 +39,7 @@ public class PaymentServiceImpl implements PaymentService{
 
     @Override
     public StateMachine<PaymentState, PaymentEvent> authorizePayment(Long paymentId) {
-        StateMachine<PaymentState,PaymentEvent> sm = buid(paymentId);
+        StateMachine<PaymentState,PaymentEvent> sm = build(paymentId);
 
         sendEvent(paymentId,sm,PaymentEvent.AUTHORIZATION_APPROVED);
 
@@ -48,13 +48,20 @@ public class PaymentServiceImpl implements PaymentService{
 
     @Override
     public StateMachine<PaymentState, PaymentEvent> declineAuth(Long paymentId) {
-        StateMachine<PaymentState,PaymentEvent> sm = buid(paymentId);
+        StateMachine<PaymentState,PaymentEvent> sm = build(paymentId);
 
         sendEvent(paymentId,sm,PaymentEvent.AUTHORIZATION_DECLINE);
 
         return null;
     }
 
+    /**
+     * Construye un mensaje con la informacion
+     * de un pago
+     * @param paymentId
+     * @param sm
+     * @param event
+     */
     private void sendEvent(Long paymentId,StateMachine<PaymentState,PaymentEvent> sm,PaymentEvent event){
         Message message = MessageBuilder.withPayload(event)
                 .setHeader(PAYMENT_ID_HEADER,paymentId)
@@ -63,13 +70,21 @@ public class PaymentServiceImpl implements PaymentService{
         sm.sendEvent(message);
     }
 
-    private StateMachine<PaymentState,PaymentEvent> buid(Long paymentId){
+    /**
+     * Consulta el estado de un pago en la db
+     * y lo actualiza para volverlo a subir a
+     * db (lo actualiza)
+     * @param paymentId pago
+     * @return el sm actualizado
+     */
+    private StateMachine<PaymentState,PaymentEvent> build(Long paymentId){
         Payment payment = repository.getById(paymentId);
         StateMachine<PaymentState,PaymentEvent> sm = factory.getStateMachine(Long.toString(payment.getId()));
 
         sm.stop();
 
         sm.getStateMachineAccessor().doWithAllRegions(sma -> {
+            sma.addStateMachineInterceptor(interceptor);
             sma.resetStateMachine(
                     new DefaultStateMachineContext<>(payment.getPaymentState(),null,null,null));
         });
