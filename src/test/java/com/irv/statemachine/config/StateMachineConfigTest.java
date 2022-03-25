@@ -27,6 +27,8 @@ class StateMachineConfigTest {
         getState(sm);
         sm.sendEvent(PaymentEvent.PRE_AUTHORIZE_APPROVED);
         getState(sm);
+        sm.sendEvent(PaymentEvent.AUTHORIZATION_DECLINE);//se ignora esta linea y creo que es porque este comportamiento no se definio
+        getState(sm);
     }
     void getState(StateMachine<PaymentState,PaymentEvent> sm){
         System.out.println(sm.getState().toString());
